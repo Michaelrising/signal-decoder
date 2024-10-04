@@ -30,7 +30,7 @@ class SignalDecoder:
         # Ensure 'resid' column exists in self.db
         # if 'resid' not in self.db.columns:
         #     raise KeyError("'resid' column not found in the database")
-        _hedged_ret = self.db['resid']
+        _hedged_ret = self.db['resid']#.shift(-1)
         assert sigs.columns.isin(_hedged_ret.columns).all(), 'signal must have the same equities as DailyDB'
         _hedged_ret = _hedged_ret[sigs.columns]
         long_pnl = sigs.where(sigs > 0).shift() * _hedged_ret
@@ -46,7 +46,7 @@ class SignalDecoder:
         '''
         decode the hedge return
         '''
-        _hedge_ret = self.db['last'].pct_change().shift(-1) - self.db['resid']
+        _hedge_ret = self.db['last'].pct_change() - self.db['resid'] # TODO 
         assert sigs.columns.isin(_hedge_ret.columns).all(), 'signal must have the same equities as DailyDB'
         _hedge_ret = _hedge_ret[sigs.columns]
         h_long_pnl = sigs.where(sigs > 0).shift() * _hedge_ret
@@ -173,6 +173,35 @@ class SignalDecoder:
         }
         
         return shifted_res, peak_metrics
+    
+    def decode_capital_effect(self, q0: float=0.1, q1: float=0.9):
+        lpnl_t, spnl_t, tpnl_t, _, _ = self.decode_long_short(self.signal.copy())
+        market_cap = self.db['mkt_cap_usd']
+
+        # Ensure market_cap and signal have the same columns (stocks)
+        market_cap = market_cap[self.signal.columns]
+
+        # Calculate daily quantiles
+        daily_q0 = market_cap.quantile(q0, axis=1)
+        daily_q1 = market_cap.quantile(q1, axis=1)
+
+        # Create masks for small, mid, and large cap stocks
+        small_cap_mask = market_cap.lt(daily_q0, axis=0)
+        large_cap_mask = market_cap.ge(daily_q1, axis=0)
+        mid_cap_mask = ~(small_cap_mask | large_cap_mask)
+
+
+        # Calculate metrics for each cap group
+        small_cap_metrics = self.get_metrics(lpnl_t, spnl_t, tpnl_t, small_cap_mask)
+        mid_cap_metrics = self.get_metrics(lpnl_t, spnl_t, tpnl_t, mid_cap_mask)
+        large_cap_metrics = self.get_metrics(lpnl_t, spnl_t, tpnl_t, large_cap_mask)
+
+
+        return {
+            'small_cap': {'metrics': small_cap_metrics},
+            'mid_cap': {'metrics': mid_cap_metrics},
+            'large_cap': {'metrics': large_cap_metrics}
+        }
 
     def calculate_max_drawdown(self, cumulative_returns):
         peak = cumulative_returns.sort_index().expanding(min_periods=1).max()
@@ -202,7 +231,8 @@ class SignalDecoder:
     def get_metrics(self, 
                     total_pnl: pd.DataFrame, 
                     long_pnl: pd.DataFrame, 
-                    short_pnl: pd.DataFrame):
+                    short_pnl: pd.DataFrame,
+                    mask: pd.DataFrame|None=None):
         '''
         Calculate metrics for total, long, and short pnl.
         ''' 
@@ -210,7 +240,12 @@ class SignalDecoder:
         daily_long_pnl = long_pnl.sum(axis=1)
         daily_short_pnl = short_pnl.sum(axis=1) 
 
-        signal = self.signal.copy()
+        if mask is not None:
+            daily_total_pnl = daily_total_pnl * mask
+            daily_long_pnl = daily_long_pnl * mask
+            daily_short_pnl = daily_short_pnl * mask
+            signal = self.signal.copy() * mask
+
         lmv = signal.where(signal > 0).sum(axis=1)
         smv = -1 * signal.where(signal < 0).sum(axis=1)
         gmv = lmv + smv

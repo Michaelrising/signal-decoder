@@ -3,6 +3,8 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import plotly.graph_objects as go
+
 
 def load_signal(signal_file):
     signal = pd.read_csv(signal_file, index_col=0, parse_dates=True)
@@ -47,7 +49,7 @@ def plot_results(long_pnl, short_pnl, total_pnl, correlation, title_prefix=""):
         sns.histplot(data=total_pnl.sum(axis=1), kde=True, ax=ax2, label='Long-Short', color='purple', stat='density')
         sns.histplot(data=long_pnl.sum(axis=1), kde=True, ax=ax2, label='Long', color='green', stat='density')
         sns.histplot(data=short_pnl.sum(axis=1), kde=True, ax=ax2, label='Short', color='red', stat='density')
-        ax2.set_title(f'{title_prefix} PnL Distribution', fontsize=16)
+        ax2.set_title('PnL Distribution', fontsize=16)
         ax2.set_xlabel('Daily PnL', fontsize=12)
         ax2.set_ylabel('Density', fontsize=12)
         ax2.legend(fontsize=10)
@@ -108,3 +110,66 @@ def plot_single_asset_results(asset_results, asset):
     
     plt.tight_layout()
     st.pyplot(fig)
+
+
+def calhalfic(x):
+    # Implement the calhalfic function if it's not defined elsewhere
+    # This is a placeholder implementation, adjust as needed
+    return np.log(2) / np.log(1 + x.iloc[0] / x.iloc[-1])
+
+def create_calendar_plot(metrics, title, x_title):
+    fig = go.Figure()
+    
+    # Add Mean PnL bars
+    fig.add_trace(go.Bar(
+        x=metrics.index,
+        y=metrics['mean'],
+        width=0.5,
+        name='Mean PnL',
+        marker_color='lightblue'
+    ))
+    
+    # Add Sharpe ratio line
+    fig.add_trace(go.Scatter(
+        x=metrics.index,
+        y=metrics['sh'],
+        name='Sharpe',
+        yaxis='y2',
+        line=dict(color='orange', width=2)
+    ))
+    
+    # Update layout
+    fig.update_layout(
+        title=title,
+        xaxis_title=x_title,
+        yaxis=dict(
+            title='Mean PnL',
+            side='left',
+            showgrid=False,
+            zeroline=True,
+            zerolinecolor='black',
+            zerolinewidth=2
+        ),
+        yaxis2=dict(
+            title='Sharpe',
+            side='right',
+            overlaying='y',
+            showgrid=False,
+            zeroline=True,
+            zerolinecolor='black',
+            zerolinewidth=2
+        ),
+        legend=dict(x=0.01, y=0.99, bgcolor='rgba(255, 255, 255, 0.5)'),
+        height=400
+    )
+    
+    # Ensure both y-axes include zero and have the same zero point
+    y_range = max(abs(min(metrics['mean'].min(), 0)), abs(max(metrics['mean'].max(), 0)))
+    y2_range = max(abs(min(metrics['sh'].min(), 0)), abs(max(metrics['sh'].max(), 0)))
+    
+    fig.update_layout(
+        yaxis=dict(range=[-y_range, y_range]),
+        yaxis2=dict(range=[-y2_range, y2_range])
+    )
+    
+    return fig
